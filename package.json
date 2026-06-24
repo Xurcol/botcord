@@ -1,6 +1,6 @@
 {
   "name": "botcord",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Discord client powered by a bot token",
   "main": "main.js",
   "scripts": {

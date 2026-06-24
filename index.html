@@ -1150,8 +1150,8 @@
           <div class="eq-fx-header" style="margin-top:8px"><span>Auto-Orbit</span><button class="eq-fx-toggle" id="eq8DOrbitToggle" onclick="eqToggle8DOrbit()"></button></div>
           <div class="eq-fx-slider"><label>Speed:</label><input type="range" id="eq8DSpeed" min="0.05" max="2" step="0.05" value="0.3" oninput="eqChange8D()"><span class="eq-fx-val" id="eq8DSpeedVal">0.30</span></div>
           <div class="eq-fx-slider"><label>Radius:</label><input type="range" id="eq8DDepth" min="0.1" max="5" step="0.1" value="2" oninput="eqChange8D()"><span class="eq-fx-val" id="eq8DDepthVal">2.0</span></div>
-          <div class="eq-fx-header" style="margin-top:8px"><span>Stereo Wide / Dual Mono</span><button class="eq-fx-toggle" id="eqStereoToggle" onclick="eqToggleStereoWide()"></button></div>
-          <div class="eq-fx-slider"><label>Blend:</label><input type="range" id="eqStereoWidth" min="1" max="3" step="0.05" value="3" oninput="eqChangeStereoWide()"><span class="eq-fx-val" id="eqStereoWidthVal">Mono L+R</span></div>
+          <div class="eq-fx-header" style="margin-top:8px"><span>3D Stereo Hall</span><button class="eq-fx-toggle" id="eqStereoToggle" onclick="eqToggleStereoWide()"></button></div>
+          <div class="eq-fx-slider"><label>Delay:</label><input type="range" id="eqStereoWidth" min="1" max="3" step="0.05" value="2.35" oninput="eqChangeStereoWide()"><span class="eq-fx-val" id="eqStereoWidthVal">Off</span></div>
         </div>
         <div class="eq-fx-section">
           <div class="eq-section-title">Reverb</div>
@@ -2624,25 +2624,29 @@ function mp3RebuildEq(id) {
   if (eqStereo?.on) {
     const splitter = mp3EqCtx.createChannelSplitter(2);
     const merger = mp3EqCtx.createChannelMerger(2);
-    const leftToLeft = mp3EqCtx.createGain();
-    const rightToLeft = mp3EqCtx.createGain();
-    const leftToRight = mp3EqCtx.createGain();
-    const rightToRight = mp3EqCtx.createGain();
-    leftToLeft.gain.value = 0.5;
-    rightToLeft.gain.value = 0.5;
-    leftToRight.gain.value = 0.5;
-    rightToRight.gain.value = 0.5;
+    const monoLeft = mp3EqCtx.createGain();
+    const monoRight = mp3EqCtx.createGain();
+    const directLeft = mp3EqCtx.createGain();
+    const delayedRight = mp3EqCtx.createGain();
+    const haasDelay = mp3EqCtx.createDelay(0.05);
+    const delayMs = 4 + (Math.max(1, Math.min(3, Number(eqStereo.width || 2.35))) - 1) * 9;
+    monoLeft.gain.value = 0.5;
+    monoRight.gain.value = 0.5;
+    directLeft.gain.value = 0.94;
+    delayedRight.gain.value = 0.94;
+    haasDelay.delayTime.value = delayMs / 1000;
     current.connect(splitter);
-    splitter.connect(leftToLeft, 0);
-    splitter.connect(rightToLeft, 1);
-    splitter.connect(leftToRight, 0);
-    splitter.connect(rightToRight, 1);
-    leftToLeft.connect(merger, 0, 0);
-    rightToLeft.connect(merger, 0, 0);
-    leftToRight.connect(merger, 0, 1);
-    rightToRight.connect(merger, 0, 1);
+    splitter.connect(monoLeft, 0);
+    splitter.connect(monoLeft, 1);
+    splitter.connect(monoRight, 0);
+    splitter.connect(monoRight, 1);
+    monoLeft.connect(directLeft);
+    monoRight.connect(haasDelay);
+    haasDelay.connect(delayedRight);
+    directLeft.connect(merger, 0, 0);
+    delayedRight.connect(merger, 0, 1);
     current = merger;
-    nodes.push(splitter, merger, leftToLeft, rightToLeft, leftToRight, rightToRight);
+    nodes.push(splitter, merger, monoLeft, monoRight, directLeft, delayedRight, haasDelay);
   }
 
   if (eqReverb?.on) {
@@ -7327,7 +7331,7 @@ const EQ_PRESETS = {
   bright: { name: 'Bright / Crisp', bands: [{freq:60,gain:-4,type:'lowshelf',Q:1},{freq:500,gain:0,type:'peaking',Q:1},{freq:2000,gain:4,type:'peaking',Q:1},{freq:6000,gain:8,type:'peaking',Q:1},{freq:12000,gain:10,type:'highshelf',Q:1}], gain:0.9, pitch:{on:false,val:0}, reverb:{on:false,dry:.7,wet:.3,damp:.5,room:.5} },
   telephone: { name: 'Telephone', bands: [{freq:300,gain:-30,type:'highpass',Q:1},{freq:800,gain:6,type:'peaking',Q:2},{freq:2000,gain:8,type:'peaking',Q:3},{freq:3400,gain:-30,type:'lowpass',Q:1},{freq:10000,gain:-30,type:'peaking',Q:1}], gain:1.5, pitch:{on:false,val:0}, reverb:{on:false,dry:.7,wet:.3,damp:.5,room:.5} },
   '8d_immersive': { name: '8D Immersive', bands: [{freq:60,gain:4,type:'lowshelf',Q:1},{freq:400,gain:0,type:'peaking',Q:1},{freq:1000,gain:2,type:'peaking',Q:1},{freq:5000,gain:3,type:'peaking',Q:1},{freq:12000,gain:2,type:'highshelf',Q:1}], gain:0.9, pitch:{on:false,val:0}, '8d':{on:true,speed:0.25,depth:2.5,x:0,y:0,z:0,orbit:true}, reverb:{on:true,dry:.5,wet:.5,damp:.3,room:.6} },
-  stereo_wide: { name: 'Hard Stereo Wide', bands: [{freq:55,gain:3,type:'lowshelf',Q:1},{freq:250,gain:0,type:'peaking',Q:1},{freq:1200,gain:1,type:'peaking',Q:1},{freq:6500,gain:3,type:'peaking',Q:1},{freq:12000,gain:4,type:'highshelf',Q:1}], gain:0.9, pitch:{on:false,val:0}, stereo:{on:true,width:2.6}, reverb:{on:false,dry:.7,wet:.3,damp:.5,room:.5} },
+  stereo_wide: { name: '3D Stereo Hall', bands: [{freq:55,gain:2,type:'lowshelf',Q:1},{freq:250,gain:0,type:'peaking',Q:1},{freq:1200,gain:1,type:'peaking',Q:1},{freq:6500,gain:2.5,type:'peaking',Q:1},{freq:12000,gain:3,type:'highshelf',Q:1}], gain:0.9, pitch:{on:false,val:0}, stereo:{on:true,width:2.35}, reverb:{on:true,dry:.62,wet:.38,damp:.32,room:.74} },
   echo_chamber: { name: 'Echo Chamber', bands: [{freq:100,gain:2,type:'peaking',Q:1},{freq:500,gain:0,type:'peaking',Q:1},{freq:1000,gain:0,type:'peaking',Q:1},{freq:5000,gain:-2,type:'peaking',Q:1},{freq:10000,gain:-4,type:'peaking',Q:1}], gain:0.8, pitch:{on:false,val:0}, delay:{on:true,time:0.4,feedback:0.5,mix:0.4}, reverb:{on:true,dry:.4,wet:.6,damp:.3,room:.8} },
   megaphone: { name: 'Megaphone', bands: [{freq:100,gain:-10,type:'highpass',Q:1},{freq:500,gain:4,type:'peaking',Q:2},{freq:2000,gain:10,type:'peaking',Q:3},{freq:5000,gain:6,type:'peaking',Q:2},{freq:10000,gain:-8,type:'lowpass',Q:1}], gain:1.4, pitch:{on:false,val:0}, dist:{on:true,amount:30,mix:0.3}, comp:{on:true,threshold:-20,ratio:8,knee:5,attack:0.003,release:0.1} },
   underwater: { name: 'Underwater', bands: [{freq:200,gain:6,type:'lowshelf',Q:1},{freq:500,gain:2,type:'peaking',Q:2},{freq:1500,gain:-8,type:'peaking',Q:1},{freq:5000,gain:-20,type:'peaking',Q:1},{freq:10000,gain:-30,type:'highshelf',Q:1}], gain:0.9, pitch:{on:true,val:-2}, tremolo:{on:true,speed:3,depth:0.3}, reverb:{on:true,dry:.4,wet:.6,damp:.1,room:.7} },
@@ -7343,7 +7347,7 @@ let eqGain = 1.0;
 let eqEnabled = true;
 let eqPitch = { on: false, val: 0 };
 let eq8D = { on: false, speed: 0.3, depth: 2, x: 0, y: 0, z: 0, orbit: false };
-let eqStereo = { on: false, width: 3 };
+let eqStereo = { on: false, width: 2.35 };
 let eqComp = { on: false, threshold: -24, ratio: 4, knee: 10, attack: 0.003, release: 0.25 };
 let eqDist = { on: false, amount: 50, mix: 0.5 };
 let eqDelay = { on: false, time: 0.3, feedback: 0.4, mix: 0.3 };
@@ -7404,7 +7408,7 @@ function eqSyncUI() {
   document.getElementById('eq8DDepthVal').textContent = eq8D.depth.toFixed(1);
   document.getElementById('eqStereoToggle')?.classList.toggle('on', eqStereo.on);
   if (document.getElementById('eqStereoWidth')) document.getElementById('eqStereoWidth').value = eqStereo.width;
-  if (document.getElementById('eqStereoWidthVal')) document.getElementById('eqStereoWidthVal').textContent = eqStereo.on ? 'Mono L+R' : 'Off';
+  if (document.getElementById('eqStereoWidthVal')) document.getElementById('eqStereoWidthVal').textContent = eqStereo.on ? `${Math.round(4 + (eqStereo.width - 1) * 9)}ms` : 'Off';
   eqUpdateSpatialUI();
   document.getElementById('eqCompToggle').classList.toggle('on', eqComp.on);
   document.getElementById('eqCompThreshold').value = eqComp.threshold;
@@ -7601,7 +7605,7 @@ function eqToggleStereoWide() {
   eqStereo.on = !eqStereo.on;
   document.getElementById('eqStereoToggle')?.classList.toggle('on', eqStereo.on);
   const val = document.getElementById('eqStereoWidthVal');
-  if (val) val.textContent = eqStereo.on ? 'Mono L+R' : 'Off';
+  if (val) val.textContent = eqStereo.on ? `${Math.round(4 + (eqStereo.width - 1) * 9)}ms` : 'Off';
   eqActivePreset = null;
   eqApplyChain();
   soundpadScheduleEqPush(0);
@@ -7611,11 +7615,10 @@ function eqToggleStereoWide() {
 }
 
 function eqChangeStereoWide() {
-  eqStereo.width = 3;
   const slider = document.getElementById('eqStereoWidth');
-  if (slider) slider.value = 3;
+  if (slider) eqStereo.width = parseFloat(slider.value);
   const val = document.getElementById('eqStereoWidthVal');
-  if (val) val.textContent = eqStereo.on ? 'Mono L+R' : 'Off';
+  if (val) val.textContent = eqStereo.on ? `${Math.round(4 + (eqStereo.width - 1) * 9)}ms` : 'Off';
   eqActivePreset = null;
   soundpadScheduleEqPush(0);
   mp3RebuildAllEq();
@@ -7946,7 +7949,7 @@ async function eqLoadPreset(key) {
   eqPitch = p.pitch ? { ...p.pitch } : { on: false, val: 0 };
   eq8DStopOrbit();
   eq8D = p['8d'] ? { ...{ on: false, speed: 0.3, depth: 2, x: 0, y: 0, z: 0, orbit: false }, ...p['8d'] } : { on: false, speed: 0.3, depth: 2, x: 0, y: 0, z: 0, orbit: false };
-  eqStereo = p.stereo ? { ...{ on: false, width: 3 }, ...p.stereo, width: 3 } : { on: false, width: 3 };
+  eqStereo = p.stereo ? { ...{ on: false, width: 2.35 }, ...p.stereo } : { on: false, width: 2.35 };
   eqComp = p.comp ? { ...p.comp } : { on: false, threshold: -24, ratio: 4, knee: 10, attack: 0.003, release: 0.25 };
   eqDist = p.dist ? { ...p.dist } : { on: false, amount: 50, mix: 0.5 };
   eqDelay = p.delay ? { ...p.delay } : { on: false, time: 0.3, feedback: 0.4, mix: 0.3 };
@@ -8166,7 +8169,7 @@ function eqMakeDistCurve(amount) {
 }
 
 function eqCreateReverbIR(ctx, roomSize, dampness) {
-  const duration = 0.5 + roomSize * 4;
+  const duration = 0.75 + roomSize * 4.75;
   const sampleRate = ctx.sampleRate;
   const length = Math.floor(sampleRate * duration);
   const ir = ctx.createBuffer(2, length, sampleRate);
@@ -8174,9 +8177,15 @@ function eqCreateReverbIR(ctx, roomSize, dampness) {
     const data = ir.getChannelData(ch);
     for (let i = 0; i < length; i++) {
       const t = i / sampleRate;
-      const decay = Math.exp(-t * (3 + dampness * 10) / (roomSize + 0.01));
-      data[i] = (Math.random() * 2 - 1) * decay;
+      const decay = Math.exp(-t * (1.8 + dampness * 6.5) / (0.35 + roomSize));
+      const shimmer = Math.sin(t * 860 + ch * 1.7) * 0.08 + Math.sin(t * 1730 + ch) * 0.035;
+      data[i] = ((Math.random() * 2 - 1) * 0.88 + shimmer) * decay * 0.62;
     }
+    const early = [0.011, 0.019, 0.031, 0.047, 0.071, 0.113, 0.171];
+    early.forEach((sec, idx) => {
+      const pos = Math.min(length - 1, Math.floor((sec + ch * 0.0025) * sampleRate));
+      data[pos] += (idx % 2 ? -1 : 1) * (0.42 / (idx + 1)) * (1 - dampness * 0.35);
+    });
   }
   return ir;
 }
@@ -8266,7 +8275,7 @@ function eqLoadSettings() {
     if (saved.enabled !== undefined) eqEnabled = saved.enabled;
     if (saved.pitch) eqPitch = saved.pitch;
     if (saved['8d']) eq8D = saved['8d'];
-    if (saved.stereo) eqStereo = { ...eqStereo, ...saved.stereo, width: 3 };
+    if (saved.stereo) eqStereo = { ...eqStereo, ...saved.stereo };
     if (saved.comp) eqComp = saved.comp;
     if (saved.dist) eqDist = saved.dist;
     if (saved.delay) eqDelay = saved.delay;

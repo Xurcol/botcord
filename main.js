@@ -1125,12 +1125,22 @@ function buildSoundpadFilters(settings = {}) {
     const wet = safeFilterNumber(settings.reverb.wet, 0.3, 0, 1);
     const damp = safeFilterNumber(settings.reverb.damp, 0.5, 0, 1);
     const dry = safeFilterNumber(settings.reverb.dry, 0.7, 0, 1);
-    const delay1 = Math.round(18 + room * 32);
-    const delay2 = Math.round(42 + room * 58);
-    const decay1 = Math.min(0.22, Math.max(0.025, wet * 0.2));
-    const decay2 = Math.min(0.16, Math.max(0.015, wet * 0.13));
-    const lowpass = Math.round(12500 - damp * 6500);
-    filters.push(`aecho=${Math.max(0.55, dry).toFixed(2)}:${Math.min(0.34, wet * 0.55).toFixed(2)}:${delay1}|${delay2}:${decay1.toFixed(3)}|${decay2.toFixed(3)}`, `lowpass=f=${lowpass}`);
+    const delay1 = Math.round(24 + room * 42);
+    const delay2 = Math.round(58 + room * 76);
+    const delay3 = Math.round(105 + room * 120);
+    const delay4 = Math.round(170 + room * 170);
+    const decayBase = Math.min(0.34, Math.max(0.04, wet * (0.18 + room * 0.22)));
+    const decay1 = decayBase;
+    const decay2 = decayBase * 0.72;
+    const decay3 = decayBase * 0.48;
+    const decay4 = decayBase * 0.28;
+    const lowpass = Math.round(14500 - damp * 7600);
+    const highpass = Math.round(45 + damp * 35);
+    filters.push(
+      `aecho=${Math.max(0.42, dry).toFixed(2)}:${Math.min(0.48, wet * 0.7).toFixed(2)}:${delay1}|${delay2}|${delay3}|${delay4}:${decay1.toFixed(3)}|${decay2.toFixed(3)}|${decay3.toFixed(3)}|${decay4.toFixed(3)}`,
+      `highpass=f=${highpass}`,
+      `lowpass=f=${lowpass}`,
+    );
   }
 
   const gain = safeFilterNumber(settings.gain, 1, 0, 4);
@@ -1148,6 +1158,7 @@ function createSoundpadLiveTransform(entry) {
   let carry = Buffer.alloc(0);
   entry.livePan = Number.isFinite(entry.livePan) ? entry.livePan : 0;
   entry.liveOrbitAngle = Number.isFinite(entry.liveOrbitAngle) ? entry.liveOrbitAngle : 0;
+  entry.stereoDelayIndex = Number.isInteger(entry.stereoDelayIndex) ? entry.stereoDelayIndex : 0;
   return new Transform({
     transform(chunk, _encoding, callback) {
       const input = carry.length ? Buffer.concat([carry, chunk]) : chunk;
@@ -1158,7 +1169,13 @@ function createSoundpadLiveTransform(entry) {
       const output = Buffer.allocUnsafe(usable);
       const settings = entry.settings || {};
       const spatial = settings['8d'] || settings.spatial || {};
-      const stereoMono = !!settings.stereo?.on;
+      const stereo3d = !!settings.stereo?.on;
+      const stereoWidth = safeFilterNumber(settings.stereo?.width, 2.35, 1, 3);
+      const stereoDelayFrames = stereo3d ? Math.round((4 + (stereoWidth - 1) * 9) * 48) : 0;
+      if (stereo3d && (!entry.stereoDelayBuffer || entry.stereoDelayBuffer.length !== stereoDelayFrames)) {
+        entry.stereoDelayBuffer = new Int16Array(Math.max(1, stereoDelayFrames));
+        entry.stereoDelayIndex = 0;
+      }
       const targetPan = spatial?.on ? Math.max(-1, Math.min(1, safeFilterNumber(spatial.x, 0, -5, 5) / 5)) : 0;
       const targetDepth = spatial?.on ? Math.max(0, Math.min(1, Math.abs(safeFilterNumber(spatial.z, 0, -5, 5)) / 10)) : 0;
       const orbiting = !!(spatial?.on && spatial.orbit);
@@ -1171,10 +1188,14 @@ function createSoundpadLiveTransform(entry) {
         let left = input.readInt16LE(offset);
         let right = input.readInt16LE(offset + 2);
 
-        if (stereoMono) {
+        if (stereo3d) {
           const mono = (left + right) * 0.5;
-          left = mono;
-          right = mono;
+          const delayed = entry.stereoDelayBuffer[entry.stereoDelayIndex] || mono;
+          entry.stereoDelayBuffer[entry.stereoDelayIndex] = clampInt16(mono);
+          entry.stereoDelayIndex = (entry.stereoDelayIndex + 1) % entry.stereoDelayBuffer.length;
+          const blend = Math.max(0.12, Math.min(0.28, 0.1 + (stereoWidth - 1) * 0.09));
+          left = mono * (1 - blend) + delayed * blend;
+          right = delayed * (1 - blend) + mono * blend;
         }
 
         let liveTargetPan = targetPan;
@@ -1191,7 +1212,7 @@ function createSoundpadLiveTransform(entry) {
         const leftGain = pan <= 0 ? 1 : 1 - pan;
         const rightGain = pan >= 0 ? 1 : 1 + pan;
 
-        if (liveWidthBoost && !stereoMono) {
+        if (liveWidthBoost && !stereo3d) {
           const mid = (left + right) * 0.5;
           const side = (left - right) * (0.5 + liveWidthBoost);
           left = mid + side;

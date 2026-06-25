@@ -1151,7 +1151,7 @@
           <div class="eq-fx-slider"><label>Speed:</label><input type="range" id="eq8DSpeed" min="0.05" max="2" step="0.05" value="0.3" oninput="eqChange8D()"><span class="eq-fx-val" id="eq8DSpeedVal">0.30</span></div>
           <div class="eq-fx-slider"><label>Radius:</label><input type="range" id="eq8DDepth" min="0.1" max="5" step="0.1" value="2" oninput="eqChange8D()"><span class="eq-fx-val" id="eq8DDepthVal">2.0</span></div>
           <div class="eq-fx-header" style="margin-top:8px"><span>3D Stereo Hall</span><button class="eq-fx-toggle" id="eqStereoToggle" onclick="eqToggleStereoWide()"></button></div>
-          <div class="eq-fx-slider"><label>Delay:</label><input type="range" id="eqStereoWidth" min="1" max="3" step="0.05" value="2.35" oninput="eqChangeStereoWide()"><span class="eq-fx-val" id="eqStereoWidthVal">Off</span></div>
+          <div class="eq-fx-slider"><label>Width:</label><input type="range" id="eqStereoWidth" min="1" max="3" step="0.05" value="2.35" oninput="eqChangeStereoWide()"><span class="eq-fx-val" id="eqStereoWidthVal">Off</span></div>
         </div>
         <div class="eq-fx-section">
           <div class="eq-section-title">Reverb</div>
@@ -1303,7 +1303,7 @@ let voiceNoiseSuppression = localStorage.getItem('voice-ns') !== 'false';
 let voiceEchoCancellation = localStorage.getItem('voice-ec') !== 'false';
 let voiceAutoGain = localStorage.getItem('voice-agc') !== 'false';
 let voiceHQAudio = { enabled: true, bitrate: 512000, stereo: true, freq: 48000 };
-let voiceMusicMode = localStorage.getItem('voice-music-mode') === 'true';
+let voiceMusicMode = true;
 let micTestStream = null, micTestAnalyser = null, micTestRaf = null;
 let voiceMicStream = null, voiceMicContext = null, voiceMicProcessor = null, voiceMicSource = null;
 let localSpeaking = false, localSpeakingTimer = null;
@@ -2622,31 +2622,12 @@ function mp3RebuildEq(id) {
   nodes.push(gain);
 
   if (eqStereo?.on) {
-    const splitter = mp3EqCtx.createChannelSplitter(2);
-    const merger = mp3EqCtx.createChannelMerger(2);
-    const monoLeft = mp3EqCtx.createGain();
-    const monoRight = mp3EqCtx.createGain();
-    const directLeft = mp3EqCtx.createGain();
-    const delayedRight = mp3EqCtx.createGain();
-    const haasDelay = mp3EqCtx.createDelay(0.05);
-    const delayMs = 4 + (Math.max(1, Math.min(3, Number(eqStereo.width || 2.35))) - 1) * 9;
-    monoLeft.gain.value = 0.5;
-    monoRight.gain.value = 0.5;
-    directLeft.gain.value = 0.94;
-    delayedRight.gain.value = 0.94;
-    haasDelay.delayTime.value = delayMs / 1000;
-    current.connect(splitter);
-    splitter.connect(monoLeft, 0);
-    splitter.connect(monoLeft, 1);
-    splitter.connect(monoRight, 0);
-    splitter.connect(monoRight, 1);
-    monoLeft.connect(directLeft);
-    monoRight.connect(haasDelay);
-    haasDelay.connect(delayedRight);
-    directLeft.connect(merger, 0, 0);
-    delayedRight.connect(merger, 0, 1);
-    current = merger;
-    nodes.push(splitter, merger, monoLeft, monoRight, directLeft, delayedRight, haasDelay);
+    // passthrough test — just a gain node, no processing
+    const passGain = mp3EqCtx.createGain();
+    passGain.gain.value = 1.0;
+    current.connect(passGain);
+    current = passGain;
+    nodes.push(passGain);
   }
 
   if (eqReverb?.on) {
@@ -3016,16 +2997,16 @@ function toggleChannelNotifications(button, scope) {
 }
 function toggleServerMute(guildId) {
   if (!guildId) return;
-  const mutedServers = new Set(JSON.parse(localStorage.getItem('muted-servers') || '[]'));
+  const mutedServers = new Set(JSON.parse(localStorage.getItem('muted-guilds') || '[]'));
   const muted = mutedServers.has(guildId);
   if (muted) mutedServers.delete(guildId);
   else mutedServers.add(guildId);
-  localStorage.setItem('muted-servers', JSON.stringify([...mutedServers]));
+  localStorage.setItem('muted-guilds', JSON.stringify([...mutedServers]));
   showToast(muted ? 'Server unmuted' : 'Server muted');
 }
 function isChannelMuted(channelId, guildId) {
   const mutedChannels = new Set(JSON.parse(localStorage.getItem('muted-channels') || '[]'));
-  const mutedServers = new Set(JSON.parse(localStorage.getItem('muted-servers') || '[]'));
+  const mutedServers = new Set(JSON.parse(localStorage.getItem('muted-guilds') || '[]'));
   return mutedChannels.has(channelId) || (guildId && mutedServers.has(guildId));
 }
 
@@ -3560,7 +3541,7 @@ async function sendGif(url) {
 function handleNewMessage(msg) {
   const mentionPattern = new RegExp(`<@!?${botUser?.id}>`);
   const mutedChannels = new Set(JSON.parse(localStorage.getItem('muted-channels') || '[]'));
-  const mutedServers = new Set(JSON.parse(localStorage.getItem('muted-servers') || '[]'));
+  const mutedServers = new Set(JSON.parse(localStorage.getItem('muted-guilds') || '[]'));
   const notifLevel = localStorage.getItem('notification-level') || 'mentions';
   const isMention = mentionPattern.test(msg.content || '');
   const isMuted = mutedChannels.has(msg.channelId) || (msg.guildId && mutedServers.has(msg.guildId));
@@ -3921,10 +3902,10 @@ function eqBuildMicChain(ctx, sourceNode, destNode) {
     const curve = new Float32Array(65536);
     for (let i = 0; i < 65536; i++) {
       const x = (i / 65536) * 2 - 1;
-      curve[i] = Math.max(-0.95, Math.min(0.95, x));
+      curve[i] = Math.tanh(x * 1.2);
     }
     eqLimiter.curve = curve;
-    eqLimiter.oversample = 'none';
+    eqLimiter.oversample = '2x';
   }
   eqMuteGain.connect(eqLimiter);
   eqLimiter.connect(destNode);
@@ -4250,16 +4231,26 @@ class BotCordPcmCapture extends AudioWorkletProcessor {
     const right = input[1] || left;
     const volume = this.volume;
     for (let i = 0; i < left.length; i++) {
-      const sampleL = Math.max(-0.98, Math.min(0.98, left[i] * volume));
-      const sampleR = Math.max(-0.98, Math.min(0.98, right[i] * volume));
+      let sampleL = left[i] * volume;
+      let sampleR = right[i] * volume;
+      if (sampleL > 1) sampleL = 1; else if (sampleL < -1) sampleL = -1;
+      if (sampleR > 1) sampleR = 1; else if (sampleR < -1) sampleR = -1;
       this.energy += ((sampleL * sampleL) + (sampleR * sampleR)) / 2;
-      this.buffer[this.write * 2] = sampleL < 0 ? sampleL * 32768 : sampleL * 32767;
-      this.buffer[this.write * 2 + 1] = sampleR < 0 ? sampleR * 32768 : sampleR * 32767;
+      this.buffer[this.write * 2] = (sampleL * 32767) | 0;
+      this.buffer[this.write * 2 + 1] = (sampleR * 32767) | 0;
       this.write++;
       if (this.write >= this.frameSamples) {
         const rms = Math.sqrt(this.energy / this.frameSamples);
         let pcm = this.buffer;
-        if (rms < this.gate) pcm = new Int16Array(this.frameSamples * 2);
+        if (rms < this.gate) {
+          pcm = new Int16Array(this.frameSamples * 2);
+          const fadeLen = Math.min(64, this.frameSamples);
+          for (let j = 0; j < fadeLen; j++) {
+            const g = 1 - (j / fadeLen);
+            pcm[j * 2] = (this.buffer[j * 2] * g) | 0;
+            pcm[j * 2 + 1] = (this.buffer[j * 2 + 1] * g) | 0;
+          }
+        }
         this.port.postMessage({ type: 'pcm', pcm: pcm.buffer, rms }, [pcm.buffer]);
         this.buffer = new Int16Array(this.frameSamples * 2);
         this.write = 0;
@@ -4382,15 +4373,23 @@ async function startVoiceMicrophone(guildId) {
       const t = srcIndex - left;
       const rawL = inputLeft[left] + (inputLeft[right] - inputLeft[left]) * t;
       const rawR = inputRight[left] + (inputRight[right] - inputRight[left]) * t;
-      const sampleL = Math.max(-0.98, Math.min(0.98, rawL * volume));
-      const sampleR = Math.max(-0.98, Math.min(0.98, rawR * volume));
+      let sampleL = rawL * volume;
+      let sampleR = rawR * volume;
+      if (sampleL > 1) sampleL = 1; else if (sampleL < -1) sampleL = -1;
+      if (sampleR > 1) sampleR = 1; else if (sampleR < -1) sampleR = -1;
       energy += ((sampleL * sampleL) + (sampleR * sampleR)) / 2;
-      pcm[i * 2] = sampleL < 0 ? sampleL * 32768 : sampleL * 32767;
-      pcm[i * 2 + 1] = sampleR < 0 ? sampleR * 32768 : sampleR * 32767;
+      pcm[i * 2] = (sampleL * 32767) | 0;
+      pcm[i * 2 + 1] = (sampleR * 32767) | 0;
     }
     const rms = Math.sqrt(energy / sampleCount);
     if (rms < voiceNoiseGate) {
-      for (let i = 0; i < pcm.length; i++) pcm[i] = 0;
+      const fadeLen = Math.min(64, sampleCount);
+      for (let i = 0; i < fadeLen; i++) {
+        const g = 1 - (i / fadeLen);
+        pcm[i * 2] = (pcm[i * 2] * g) | 0;
+        pcm[i * 2 + 1] = (pcm[i * 2 + 1] * g) | 0;
+      }
+      for (let i = fadeLen * 2; i < pcm.length; i++) pcm[i] = 0;
     }
       handleVoiceMicPcm(guildId, pcm.buffer, rms);
     };
@@ -5646,12 +5645,11 @@ async function showSettingsPage(page) {
       <div class="s-section">
         <div class="s-label">Voice Settings</div>
         <div class="s-row" style="gap:16px;margin-bottom:8px">
-          <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);cursor:pointer">
-            <input type="checkbox" id="musicMode" ${voiceMusicMode ? 'checked' : ''} style="accent-color:var(--brand)">
-            Music Mode for VB-Cable / FL Studio
-          </label>
+          <div style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text)">
+            <span style="color:var(--green)">&#10003;</span> Music Mode (Always On)
+          </div>
         </div>
-        <div style="font-size:12px;color:var(--text-muted);margin:-2px 0 10px 0">Turns off browser voice cleanup and keeps stereo cleaner for music.</div>
+        <div style="font-size:12px;color:var(--text-muted);margin:-2px 0 10px 0">High quality stereo audio — browser voice cleanup is disabled for cleaner sound.</div>
         <div class="s-row" style="gap:16px">
           <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);cursor:pointer">
             <input type="checkbox" id="noiseSuppression" ${voiceNoiseSuppression ? 'checked' : ''} onchange="voiceNoiseSuppression=this.checked;localStorage.setItem('voice-ns',this.checked);restartVoiceMicrophoneForNewInput()" style="accent-color:var(--brand)">
@@ -5679,27 +5677,6 @@ async function showSettingsPage(page) {
     $('#outputDevice').onchange = async (e) => {
       await discord.setAudioDevice('audiooutput', e.target.value);
       await applyOutputDevicePreference();
-    };
-    $('#musicMode').onchange = async (e) => {
-      voiceMusicMode = e.target.checked;
-      localStorage.setItem('voice-music-mode', String(voiceMusicMode));
-      if (voiceMusicMode) {
-        voiceNoiseSuppression = false;
-        voiceEchoCancellation = false;
-        voiceAutoGain = false;
-        localStorage.setItem('voice-ns', 'false');
-        localStorage.setItem('voice-ec', 'false');
-        localStorage.setItem('voice-agc', 'false');
-        if (voiceInputVolume > 65) {
-          setVoiceInputVolume(60);
-        }
-        const ns = $('#noiseSuppression'), ec = $('#echoCancellation'), ag = $('#autoGainControl');
-        if (ns) ns.checked = false;
-        if (ec) ec.checked = false;
-        if (ag) ag.checked = false;
-      }
-      await discord.setHQAudio({ stereo: true, bitrate: 512000, musicMode: voiceMusicMode });
-      await restartVoiceMicrophoneForNewInput();
     };
     $('#inputVolume').oninput = (e) => {
       setVoiceInputVolume(e.target.value);
@@ -7172,7 +7149,7 @@ function toggleServerDropdown() {
     <div class="sd-item" onclick="hideSrvDropdown();createChannelModal()"><div class="sd-icon">➕</div>Create Channel</div>
     <div class="sd-item" onclick="hideSrvDropdown();showGuildEvents()"><div class="sd-icon">📅</div>Create Event</div>
     <div class="sd-sep"></div>
-    <div class="sd-item" onclick="hideSrvDropdown();toggleServerMute(currentGuildId)"><div class="sd-icon">🔔</div>${new Set(JSON.parse(localStorage.getItem('muted-servers')||'[]')).has(currentGuildId)?'Unmute Server':'Mute Server'}</div>
+    <div class="sd-item" onclick="hideSrvDropdown();toggleServerMute(currentGuildId)"><div class="sd-icon">🔔</div>${new Set(JSON.parse(localStorage.getItem('muted-guilds')||'[]')).has(currentGuildId)?'Unmute Server':'Mute Server'}</div>
     <div class="sd-item" onclick="hideSrvDropdown();openSettings('data-privacy')"><div class="sd-icon">🛡️</div>Privacy Settings</div>
     <div class="sd-sep"></div>
     <div class="sd-item" onclick="hideSrvDropdown();editServerNick()"><div class="sd-icon">✏️</div>Edit Server Profile</div>
@@ -7331,7 +7308,7 @@ const EQ_PRESETS = {
   bright: { name: 'Bright / Crisp', bands: [{freq:60,gain:-4,type:'lowshelf',Q:1},{freq:500,gain:0,type:'peaking',Q:1},{freq:2000,gain:4,type:'peaking',Q:1},{freq:6000,gain:8,type:'peaking',Q:1},{freq:12000,gain:10,type:'highshelf',Q:1}], gain:0.9, pitch:{on:false,val:0}, reverb:{on:false,dry:.7,wet:.3,damp:.5,room:.5} },
   telephone: { name: 'Telephone', bands: [{freq:300,gain:-30,type:'highpass',Q:1},{freq:800,gain:6,type:'peaking',Q:2},{freq:2000,gain:8,type:'peaking',Q:3},{freq:3400,gain:-30,type:'lowpass',Q:1},{freq:10000,gain:-30,type:'peaking',Q:1}], gain:1.5, pitch:{on:false,val:0}, reverb:{on:false,dry:.7,wet:.3,damp:.5,room:.5} },
   '8d_immersive': { name: '8D Immersive', bands: [{freq:60,gain:4,type:'lowshelf',Q:1},{freq:400,gain:0,type:'peaking',Q:1},{freq:1000,gain:2,type:'peaking',Q:1},{freq:5000,gain:3,type:'peaking',Q:1},{freq:12000,gain:2,type:'highshelf',Q:1}], gain:0.9, pitch:{on:false,val:0}, '8d':{on:true,speed:0.25,depth:2.5,x:0,y:0,z:0,orbit:true}, reverb:{on:true,dry:.5,wet:.5,damp:.3,room:.6} },
-  stereo_wide: { name: '3D Stereo Hall', bands: [{freq:55,gain:2,type:'lowshelf',Q:1},{freq:250,gain:0,type:'peaking',Q:1},{freq:1200,gain:1,type:'peaking',Q:1},{freq:6500,gain:2.5,type:'peaking',Q:1},{freq:12000,gain:3,type:'highshelf',Q:1}], gain:0.9, pitch:{on:false,val:0}, stereo:{on:true,width:2.35}, reverb:{on:true,dry:.62,wet:.38,damp:.32,room:.74} },
+  stereo_wide: { name: 'Hard Stereo Wide', bands: [{freq:55,gain:3,type:'lowshelf',Q:1},{freq:250,gain:0,type:'peaking',Q:1},{freq:1200,gain:1,type:'peaking',Q:1},{freq:6500,gain:3,type:'peaking',Q:1},{freq:12000,gain:4,type:'highshelf',Q:1}], gain:0.9, pitch:{on:false,val:0}, stereo:{on:true,width:2.6}, reverb:{on:false,dry:.7,wet:.3,damp:.5,room:.5} },
   echo_chamber: { name: 'Echo Chamber', bands: [{freq:100,gain:2,type:'peaking',Q:1},{freq:500,gain:0,type:'peaking',Q:1},{freq:1000,gain:0,type:'peaking',Q:1},{freq:5000,gain:-2,type:'peaking',Q:1},{freq:10000,gain:-4,type:'peaking',Q:1}], gain:0.8, pitch:{on:false,val:0}, delay:{on:true,time:0.4,feedback:0.5,mix:0.4}, reverb:{on:true,dry:.4,wet:.6,damp:.3,room:.8} },
   megaphone: { name: 'Megaphone', bands: [{freq:100,gain:-10,type:'highpass',Q:1},{freq:500,gain:4,type:'peaking',Q:2},{freq:2000,gain:10,type:'peaking',Q:3},{freq:5000,gain:6,type:'peaking',Q:2},{freq:10000,gain:-8,type:'lowpass',Q:1}], gain:1.4, pitch:{on:false,val:0}, dist:{on:true,amount:30,mix:0.3}, comp:{on:true,threshold:-20,ratio:8,knee:5,attack:0.003,release:0.1} },
   underwater: { name: 'Underwater', bands: [{freq:200,gain:6,type:'lowshelf',Q:1},{freq:500,gain:2,type:'peaking',Q:2},{freq:1500,gain:-8,type:'peaking',Q:1},{freq:5000,gain:-20,type:'peaking',Q:1},{freq:10000,gain:-30,type:'highshelf',Q:1}], gain:0.9, pitch:{on:true,val:-2}, tremolo:{on:true,speed:3,depth:0.3}, reverb:{on:true,dry:.4,wet:.6,damp:.1,room:.7} },
@@ -7408,7 +7385,10 @@ function eqSyncUI() {
   document.getElementById('eq8DDepthVal').textContent = eq8D.depth.toFixed(1);
   document.getElementById('eqStereoToggle')?.classList.toggle('on', eqStereo.on);
   if (document.getElementById('eqStereoWidth')) document.getElementById('eqStereoWidth').value = eqStereo.width;
-  if (document.getElementById('eqStereoWidthVal')) document.getElementById('eqStereoWidthVal').textContent = eqStereo.on ? `${Math.round(4 + (eqStereo.width - 1) * 9)}ms` : 'Off';
+  if (document.getElementById('eqStereoWidthVal')) {
+    const pct = Math.round(((eqStereo.width - 1) / 2) * 100);
+    document.getElementById('eqStereoWidthVal').textContent = eqStereo.on ? (pct + '%') : 'Off';
+  }
   eqUpdateSpatialUI();
   document.getElementById('eqCompToggle').classList.toggle('on', eqComp.on);
   document.getElementById('eqCompThreshold').value = eqComp.threshold;
@@ -7605,7 +7585,8 @@ function eqToggleStereoWide() {
   eqStereo.on = !eqStereo.on;
   document.getElementById('eqStereoToggle')?.classList.toggle('on', eqStereo.on);
   const val = document.getElementById('eqStereoWidthVal');
-  if (val) val.textContent = eqStereo.on ? `${Math.round(4 + (eqStereo.width - 1) * 9)}ms` : 'Off';
+  const pct = Math.round(((eqStereo.width - 1) / 2) * 100);
+  if (val) val.textContent = eqStereo.on ? (pct + '%') : 'Off';
   eqActivePreset = null;
   eqApplyChain();
   soundpadScheduleEqPush(0);
@@ -7616,9 +7597,10 @@ function eqToggleStereoWide() {
 
 function eqChangeStereoWide() {
   const slider = document.getElementById('eqStereoWidth');
-  if (slider) eqStereo.width = parseFloat(slider.value);
+  eqStereo.width = slider ? parseFloat(slider.value) : 2.35;
   const val = document.getElementById('eqStereoWidthVal');
-  if (val) val.textContent = eqStereo.on ? `${Math.round(4 + (eqStereo.width - 1) * 9)}ms` : 'Off';
+  const pct2 = Math.round(((eqStereo.width - 1) / 2) * 100);
+  if (val) val.textContent = eqStereo.on ? (pct2 + '%') : 'Off';
   eqActivePreset = null;
   soundpadScheduleEqPush(0);
   mp3RebuildAllEq();
@@ -7949,7 +7931,7 @@ async function eqLoadPreset(key) {
   eqPitch = p.pitch ? { ...p.pitch } : { on: false, val: 0 };
   eq8DStopOrbit();
   eq8D = p['8d'] ? { ...{ on: false, speed: 0.3, depth: 2, x: 0, y: 0, z: 0, orbit: false }, ...p['8d'] } : { on: false, speed: 0.3, depth: 2, x: 0, y: 0, z: 0, orbit: false };
-  eqStereo = p.stereo ? { ...{ on: false, width: 2.35 }, ...p.stereo } : { on: false, width: 2.35 };
+  eqStereo = p.stereo ? { ...{ on: false, width: 3 }, ...p.stereo, width: 3 } : { on: false, width: 3 };
   eqComp = p.comp ? { ...p.comp } : { on: false, threshold: -24, ratio: 4, knee: 10, attack: 0.003, release: 0.25 };
   eqDist = p.dist ? { ...p.dist } : { on: false, amount: 50, mix: 0.5 };
   eqDelay = p.delay ? { ...p.delay } : { on: false, time: 0.3, feedback: 0.4, mix: 0.3 };
@@ -8169,23 +8151,22 @@ function eqMakeDistCurve(amount) {
 }
 
 function eqCreateReverbIR(ctx, roomSize, dampness) {
-  const duration = 0.75 + roomSize * 4.75;
+  const duration = 0.5 + roomSize * 4;
   const sampleRate = ctx.sampleRate;
   const length = Math.floor(sampleRate * duration);
   const ir = ctx.createBuffer(2, length, sampleRate);
+  const lpFreq = 1 - dampness * 0.85;
   for (let ch = 0; ch < 2; ch++) {
     const data = ir.getChannelData(ch);
+    let prev = 0;
     for (let i = 0; i < length; i++) {
       const t = i / sampleRate;
-      const decay = Math.exp(-t * (1.8 + dampness * 6.5) / (0.35 + roomSize));
-      const shimmer = Math.sin(t * 860 + ch * 1.7) * 0.08 + Math.sin(t * 1730 + ch) * 0.035;
-      data[i] = ((Math.random() * 2 - 1) * 0.88 + shimmer) * decay * 0.62;
+      const decay = Math.exp(-t * (2.5 + dampness * 8) / (roomSize + 0.05));
+      const noise = Math.random() * 2 - 1;
+      const filtered = prev + lpFreq * (noise - prev);
+      prev = filtered;
+      data[i] = filtered * decay * 0.7;
     }
-    const early = [0.011, 0.019, 0.031, 0.047, 0.071, 0.113, 0.171];
-    early.forEach((sec, idx) => {
-      const pos = Math.min(length - 1, Math.floor((sec + ch * 0.0025) * sampleRate));
-      data[pos] += (idx % 2 ? -1 : 1) * (0.42 / (idx + 1)) * (1 - dampness * 0.35);
-    });
   }
   return ir;
 }
@@ -8275,7 +8256,7 @@ function eqLoadSettings() {
     if (saved.enabled !== undefined) eqEnabled = saved.enabled;
     if (saved.pitch) eqPitch = saved.pitch;
     if (saved['8d']) eq8D = saved['8d'];
-    if (saved.stereo) eqStereo = { ...eqStereo, ...saved.stereo };
+    if (saved.stereo) eqStereo = { ...eqStereo, ...saved.stereo, width: 3 };
     if (saved.comp) eqComp = saved.comp;
     if (saved.dist) eqDist = saved.dist;
     if (saved.delay) eqDelay = saved.delay;
